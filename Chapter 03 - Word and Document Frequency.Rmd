@@ -1,0 +1,142 @@
+---
+title: 'Text Mining in R: Chapter 3'
+author: "Brandon Foltz"
+date: "2023-04-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tidytext)
+library(janeaustenr)
+```
+```{r}
+book_words <- austen_books()|>
+  unnest_tokens(word, text)|>
+  count(book, word, sort = TRUE)
+
+total_words <- book_words|>
+  group_by(book)|>
+  summarise(total = sum(n))
+
+book_words <- left_join(book_words, total_words)
+
+book_words
+```
+```{r}
+ggplot(book_words, aes(n/total, fill = book)) +
+  geom_histogram(show.legend = FALSE) +
+  xlim(NA, 0.0009) +
+  facet_wrap(~book, ncol = 2, scales = "free_y")
+```
+Zipf's Law
+```{r}
+freq_by_rank <- book_words|>
+  group_by(book)|>
+  mutate(rank = row_number(),
+         `term frequency` = n/total)|>
+  ungroup()
+
+freq_by_rank
+```
+```{r}
+freq_by_rank|>
+  ggplot(aes(rank, `term frequency`, color = book)) +
+  geom_line(size = 1.1, alpha = 0.8, show.legend = FALSE) +
+  scale_x_log10() +
+  scale_y_log10()
+```
+```{r}
+rank_subset <- freq_by_rank|>
+  filter(rank < 500,
+         rank > 10)
+
+lm(log10(`term frequency`) ~ log10(rank), data = rank_subset)
+
+freq_by_rank|>
+  ggplot(aes(rank, `term frequency`, color = book)) +
+  geom_abline(intercept = -0.62, slope = -1.1,
+              color = "grey50", linetype = 2) +
+  geom_line(size = 1.1, alpha = 0.8, show.legend = FALSE) +
+  scale_x_log10() +
+  scale_y_log10()
+```
+```{r}
+book_tf_idf <- book_words|>
+  bind_tf_idf(word, book, n)
+
+book_tf_idf
+
+book_tf_idf|>
+  select(-total)|>
+  arrange(desc(tf_idf))
+
+library(forcats)
+
+book_tf_idf|>
+  group_by(book)|>
+  slice_max(tf_idf, n = 15)|>
+  ungroup()|>
+  ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free") +
+  labs(x = "tf-idf, y = NULL")
+```
+```{r}
+library(gutenbergr)
+
+physics <- gutenberg_download(c(37729, 14725, 13476, 30155),
+                              meta_fields = "author")
+```
+```{r}
+physics_words <- physics|>
+  unnest_tokens(word, text)|>
+  count(author, word, sort = TRUE)
+
+physics_words
+```
+```{r}
+plot_physics <- physics_words|>
+  bind_tf_idf(word, author, n)|>
+  mutate(author = factor(author, levels = c("Galilei, Galileo",
+                                            "Huygens, Christiaan", 
+                                            "Tesla, Nikola",
+                                            "Einstein, Albert")))
+
+plot_physics|>
+  group_by(author)|>
+  slice_max(tf_idf, n = 15)|>
+  ungroup()|>
+  mutate(word = reorder(word, tf_idf))|>
+  ggplot(aes(tf_idf, word, fill  = author)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = "tf-idf", y = NULL) +
+  facet_wrap(~author, ncol = 2, scales = "free")
+```
+```{r}
+mystopwords <- tibble(word = c("eq", "co", "rc", "ac", "ak", "bn", 
+                                   "fig", "file", "cg", "cb", "cm",
+                               "ab", "_k", "_k_", "_x"))
+
+physics_words <- anti_join(physics_words, mystopwords, 
+                           by = "word")
+
+plot_physics <- physics_words %>%
+  bind_tf_idf(word, author, n) %>%
+  mutate(word = str_remove_all(word, "_")) %>%
+  group_by(author) %>% 
+  slice_max(tf_idf, n = 15) %>%
+  ungroup() %>%
+  mutate(word = fct_reorder(word, tf_idf)) %>%
+  mutate(author = factor(author, levels = c("Galilei, Galileo",
+                                            "Huygens, Christiaan",
+                                            "Tesla, Nikola",
+                                            "Einstein, Albert")))
+
+ggplot(plot_physics, aes(tf_idf, word, fill = author)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~author, ncol = 2, scales = "free") +
+  labs(x = "tf-idf", y = NULL)
+```
+
